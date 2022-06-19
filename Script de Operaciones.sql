@@ -52,14 +52,14 @@ DECLARE @HoraInicioJ TIME
 DECLARE @HoraFinJ TIME
 DECLARE @Jornada INT
 DECLARE @horasOrdinarias INT
-DECLARE @horasDobles INT
+DECLARE @horasExtras INT
 DECLARE @montoGanadoHO MONEY = 0
-DECLARE @montoGanadoHD MONEY = 0
+DECLARE @montoGanadoHED MONEY = 0
 DECLARE @montoGanadoHE MONEY = 0
 DECLARE @EntradaOP TIME
 DECLARE @SalidaOP TIME
 DECLARE @SalarioXHora INT
-DECLARE @Dobles BIT = 0
+DECLARE @Extras BIT = 0
 DECLARE @EsJueves BIT
 DECLARE @EsFinMes BIT
 DECLARE @SalarioNeto INT
@@ -94,15 +94,10 @@ SELECT 1
 WHILE (@FechaItera<=@FechaFin)
 BEGIN
 	
-	DELETE FROM @EmpleadosInsertar
-	DELETE FROM @EmpleadosBorrar
-	DELETE FROM @InsertarDeducciones
-	DELETE FROM @EliminarDeducciones
-	DELETE FROM @asistencias
-	DELETE FROM @NuevosHorarios
+	-- Se obtiene el fin del mes para validaciones dentro de la transaccion
+	EXECUTE RetornarFinPlanillaMeS @inFecha = @FechaItera, @outFecha = @FinMes OUTPUT
 
-	EXECUTE RetornarJueves @inFecha = @FechaItera, @outFecha = @FinMes OUTPUT
-	
+	-- Insercion de valores de los nodos dentro de la fecha de operacion
 	INSERT @EmpleadosInsertar (FechaNacimiento, Nombre, Passwrd, UserName, valorDocuIdent, IdDepartamento, IdPuesto, IdTipoDocu)
 	SELECT 
 		T.Item.value('@FechaNacimiento', 'DATE'),
@@ -146,13 +141,16 @@ BEGIN
 		T.Item.value('@ValorDocumentoIdentidad', 'INT')
 	FROM @xmlData.nodes('Datos/Operacion[@Fecha = sql:variable("@FechaItera")]/TipoDeJornadaProximaSemana') as T(Item)
 	
+	-- Se valida que hayan empleados por insertar
 	IF @xmlData.exist('Datos/Operacion[@Fecha = sql:variable("@FechaItera")]/NuevoEmpleado') = 1
 	BEGIN
 
+		
 		INSERT dbo.Obrero(Nombre, IdTipoDocIdentidad, ValorDocIdentidad, IdPuesto,FechaNacimiento,IdDepartamento,IdJornada)
 		SELECT E.Nombre, E.IdTipoDocu, E.valorDocuIdent, E.IdPuesto, E.FechaNacimiento,E.IdDepartamento,1
 		FROM @EmpleadosInsertar E
 
+		-- Se crea un planilla default para su primer mes
 		INSERT dbo.PlanillaMesXEmpleado (FechaInicio,FechaFinal,SalarioNeto,SalarioTotal,TotalDeducciones,IdObrero)
 		SELECT
 			@FechaItera,
@@ -163,17 +161,21 @@ BEGIN
 			O.Id
 			FROM @EmpleadosInsertar EI
 			INNER JOIN dbo.Obrero O ON EI.valorDocuIdent=O.ValorDocIdentidad
-			
+		
+		-- Se insertan los usuarios de cada empleado nuevo para que puedan ingresar a la app web
 		INSERT dbo.Usuarios (UserName, Password, EsAdmin, IdObrero)
 		SELECT EXML.UserName, EXML.Passwrd, 0, O.Id
 		FROM @EmpleadosInsertar EXML
 		INNER JOIN dbo.Obrero O ON EXML.valorDocuIdent=O.ValorDocIdentidad
 
+		
 		SELECT @FirstEiId = MIN(EI.ID), @LastEiId = MAX(EI.ID)
 		FROM @EmpleadosInsertar EI
 
+		-- Se realiza un while para crear la primera semana de cada empleado nuevo
 		WHILE(@FirstEiId<=@LastEiId)
 		BEGIN
+
 			SELECT @DocSemana = EI.valorDocuIdent
 			FROM @EmpleadosInsertar EI
 			WHERE EI.ID = @FirstEiId
@@ -233,18 +235,26 @@ BEGIN
 		SELECT @lo=Min(A.ID), @hi=Max(A.ID)
 		FROM @asistencias A
 	
+		-- Inicio de proceso de asistencias
 		WHILE (@lo<=@hi)
 		BEGIN
+
+			-- SET de variables necesarias para varios calculos
 			SET @SalarioNeto = 0
 
 			SELECT @Entrada=A.Entrada, @Salida=A.Salida, @ValorDocIdentidad=A.ValorDocIdentidad
 			FROM @asistencias A
 			WHERE A.ID=@lo;
 
+			-- @EntradaF y @SalidaF hacen referfencia a Entrada/Salida con Fecha
+			-- la diferencia con @Entrada y @Salida es que las anteriores
+
 			SELECT @EntradaF=A.Entrada, @SalidaF=A.Salida, @ValorDocIdentidad=A.ValorDocIdentidad
 			FROM @asistencias A
 			WHERE A.ID=@lo;
-		
+			
+			-- Estas variables se utilizan para las transacciones
+			-- El @valorDocIdentidad es lo que mas se usa para mapear valores al igual que @idempleado
 			SELECT @idempleado=E.Id, @Jornada=E.IdJornada
 			FROM dbo.Obrero E
 			WHERE E.ValorDocIdentidad=@ValorDocIdentidad
@@ -254,6 +264,7 @@ BEGIN
 			INNER JOIN dbo.Obrero O ON P.ID = O.IdPuesto
 			WHERE @idempleado = O.ID
 			
+			-- Estas fechas son las que se utilizan para mapear el mes que se debe actualizar
 			SELECT @FechaFinMes = M.FechaFinal
 			FROM PlanillaMesXEmpleado M
 			WHERE M.IdObrero = @idEmpleado AND @FechaItera BETWEEN M.FechaInicio and M.FechaFinal
@@ -270,6 +281,7 @@ BEGIN
 			WHERE (J.ID = @Jornada)
 			
 			-- determinar horas ordinarias
+			-- @EntradaOP y @SalidaOP hace referencia a las variables para la operacion de calculo de horas trabajadas
 			IF @Entrada>@HoraInicioJ
 			BEGIN
 				SET @EntradaOP = @Entrada;
@@ -280,10 +292,11 @@ BEGIN
 				SET @EntradaOP = @HoraInicioJ;
 			END
 
+			-- Se calcula si hubo tiempo extra
 			IF @Salida>@HoraFinJ
 			BEGIN
 				SET @SalidaOP = @HoraFinJ;
-				SET @Dobles = 1;
+				SET @Extras = 1;
 			END
 
 			ELSE
@@ -291,33 +304,41 @@ BEGIN
 				SET @SalidaOP = @Salida;
 			END
 
+			-- Definicion de horas, extras y el monto ganado por horas ordinarias
 			SET @horasOrdinarias = (DATEDIFF(MI,@EntradaOP, @SalidaOP))/60;
 						
 			SET @montoGanadoHO = @horasOrdinarias*@SalarioXHora
 			
-			SET @horasDobles = (DATEDIFF(MI,@HoraFinJ, @Salida))/60;
+			SET @horasExtras = (DATEDIFF(MI,@HoraFinJ, @Salida))/60;
 
-			IF @Dobles=1
+			-- Se realiza el calculo del monto ganado por horas extra
+			IF @Extras=1
 			BEGIN
-				IF ((EXISTS(SELECT F.FECHA FROM FERIADOS F WHERE F.Fecha=@FechaItera)) OR (DATENAME(WEEKDAY,@FechaItera)='Sunday')) AND @horasDobles>0
+
+				-- Se revisa que las horas extra sean dentro de feriado o domingo, de no serlo se realiza el otro calculo
+				IF ((EXISTS(SELECT F.FECHA FROM FERIADOS F WHERE F.Fecha=@FechaItera)) OR (DATENAME(WEEKDAY,@FechaItera)='Sunday')) AND @horasExtras>0
 				BEGIN
 				
 					--- determinar horas extraordinarias dobles  y monto
-					SET @montoGanadoHD = (@horasDobles*@SalarioXHora)*2;
+					SET @montoGanadoHED = (@horasExtras*@SalarioXHora)*2;
 								
 					END 
 				ELSE 
 				BEGIN
 					--- determinar horas extraordinarias normales y moto
-					SET @montoGanadoHE = (@horasDobles*@SalarioXHora)*1.5;
+					SET @montoGanadoHE = (@horasExtras*@SalarioXHora)*1.5;
 							
 				END
 			END
 			SET @EsJueves = 0
+
+			-- Insercion de las deducciones a realizar al empleado
 			IF (DATENAME(WEEKDAY,@FechaItera)='Thursday')
 			BEGIN
 				SET @EsJueves = 1
 
+				-- Se utiliza una tabla variable para luego recorrerla con un while y aplicar las deducciones en orden
+				-- Insercion de obligatorias
 				INSERT @DeduccionesObrero (Monto,Porcentaje,Porcentual,IdDed,Obligatorio)
 				SELECT
 					D.Monto,
@@ -329,6 +350,7 @@ BEGIN
 					INNER JOIN dbo.TipoDeduccion TD ON D.IdTipoDeduccion = TD.ID
 					WHERE D.IdObrero = @idempleado AND TD.Obligatorio = 'Si' AND D.Activa = 1
 
+				-- Insercion de porcentuales
 				INSERT @DeduccionesObrero (Monto,Porcentaje,Porcentual,IdDed,Obligatorio)
 				SELECT
 				D.Monto,
@@ -340,6 +362,7 @@ BEGIN
 				INNER JOIN dbo.TipoDeduccion TD ON D.IdTipoDeduccion = TD.ID
 				WHERE D.IdObrero = @idempleado AND TD.Obligatorio = 'No' AND D.Activa = 1 AND TD.Porcentual = 'Si'
 
+				-- Insercion de no porcentuales
 				INSERT @DeduccionesObrero (Monto,Porcentaje,Porcentual,IdDed,Obligatorio)
 				SELECT
 				D.Monto,
@@ -354,16 +377,19 @@ BEGIN
 				SELECT @Deduccion = MIN(DO.ID) FROM @DeduccionesObrero DO
 				SELECT @MAXDeduccion = MAX(DO.ID) FROM @DeduccionesObrero DO
 
-				SELECT @SalarioNeto = S.SalarioTotal + @montoGanadoHO+@montoGanadoHE+@montoGanadoHD
+				-- Se obtiene el salario total para aplicarle las deducciones
+				SELECT @SalarioNeto = S.SalarioTotal + @montoGanadoHO+@montoGanadoHE+@montoGanadoHED
 				FROM dbo.PlanillaSemanaXEmpleado S
 				WHERE S.IdObrero = @idempleado
 
+				-- Porcesado de deducciones y definicion del salario neto
 				WHILE (@Deduccion<=@MAXDeduccion)
 				BEGIN
 					SELECT @Porcentual = DO.Porcentual
 					FROM @DeduccionesObrero DO
 					WHERE DO.ID = @Deduccion
 
+					-- Se realiza el calculo necesario dependiendo de si es porcentual o no
 					IF @Porcentual = 'Si'
 					BEGIN
 						SELECT @SalarioNeto = @SalarioNeto-(@SalarioNeto*DO.Porcentaje)
@@ -387,18 +413,23 @@ BEGIN
 				SET @EsFinMes=1
 			END
 			
-			EXEC dbo.Transaccion @inValorDocIdentidad = @valorDocIdentidad, @inEntradaF = @EntradaF, @inSalidaF = @SalidaF, @inMontoGanadoHo = @montoGanadoHo, @inMontoGanadoHD = @montoGanadoHD, @inMontoGanadoHE = @montoGanadoHE,
-					@inFechaItera = @FechaItera, @inHorasOrdinarias = @HorasOrdinarias, @inHorasDobles = @HorasDobles, @inEsFinMes = @EsFinMes, @inEsJueves = @EsJueves, @inFinNextMes = @FinNextMes, @inIdEmpleado = @idempleado,
+			-- Ejecucion de la transaccion
+			EXEC dbo.Transaccion @inValorDocIdentidad = @valorDocIdentidad, @inEntradaF = @EntradaF, @inSalidaF = @SalidaF, @inMontoGanadoHo = @montoGanadoHo, @inMontoGanadoHED = @montoGanadoHED, @inMontoGanadoHE = @montoGanadoHE,
+					@inFechaItera = @FechaItera, @inHorasOrdinarias = @HorasOrdinarias, @inHorasExtras = @horasExtras, @inEsFinMes = @EsFinMes, @inEsJueves = @EsJueves, @inFinNextMes = @FinNextMes, @inIdEmpleado = @idempleado,
 					@inSalarioNeto = @SalarioNeto, @inDeduccionesObrero = @DeduccionesObrero, @inFechaIniMes = @FechaIniMes, @inFechaFinMes = @FechaFinMes
 			
+			-- SET a la siguiente asistencia para continuar el loop
 			SET @lo = @lo +1 
 			DELETE FROM @DeduccionesObrero
 			SET @Dobles = 0
 			SET @montoGanadoHO = 0
-			SET @montoGanadoHD = 0
+			SET @montoGanadoHED = 0
 			SET @montoGanadoHE = 0
 		END
 	END
+
+	-- Aca se procesan unicamente los empleados nuevos para asignarles su siguiente jornada ya que a los empleados
+	-- existentes se les asigna la nueva jornada dentro de la transaccion
 	IF @xmlData.exist('Datos/Operacion[@Fecha = sql:variable("@FechaItera")]/TipoDeJornadaProximaSemana') = 1
 	BEGIN
 		INSERT dbo.Jornada (IdTipoJornada)
@@ -411,9 +442,12 @@ BEGIN
 		SELECT @PrimerJID = MIN(NH.ID) FROM @NuevosHorarios NH
 		SELECT @FinalJID = MAX(NH.ID) FROM @NuevosHorarios NH
 
+		-- Se navegan todas las identificaciones dentro de la tabla de nuevos horarios para ver a
+		-- quien se le debe asignar la nueva jornada
 		WHILE(@PrimerJID<=@FinalJID)
 		BEGIN
-
+			
+			-- Mapeo de valor de documento para mapear el id del empleado
 			SELECT @ValorDocuSS = NH.ValorDocIdenT 
 			FROM @NuevosHorarios NH
 			WHERE  NH.ID = @PrimerJID
@@ -441,6 +475,8 @@ BEGIN
 			SET @PrimerJID = @PrimerJID+1
 		END
 	END
+
+	-- Se eliminan los empleados en el caso que la operacion exista
 	IF @xmlData.exist('Datos/Operacion[@Fecha = sql:variable("@FechaItera")]/EliminarEmpleado') = 1
 	BEGIN
 		UPDATE dbo.Obrero
@@ -448,6 +484,8 @@ BEGIN
 		FROM @EmpleadosBorrar EB
 		WHERE EB.ValorDocuId = ValorDocIdentidad
 	END
+
+	-- Reseteo de tablas variable para empezar la siguiente fecha de operacion
 	DELETE FROM @asistencias
 	DELETE FROM @EmpleadosBorrar
 	DELETE FROM @EliminarDeducciones

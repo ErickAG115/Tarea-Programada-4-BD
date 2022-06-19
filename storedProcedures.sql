@@ -177,8 +177,8 @@ EXEC [SalariosAnuales] @inUsername = 'LGomes'
 DROP PROCEDURE IF EXISTS [dbo].[RetornarJueves]
 
 
-CREATE PROCEDURE [dbo].[RetornarJueves] @inFecha DATE, @outFecha DATE OUTPUT
-
+CREATE PROCEDURE [dbo].[RetornarFinPlanillaMes] @inFecha DATE, @outFecha DATE OUTPUT --SE REALIZA UN CALCULO PARA RETORNAR EL JUEVES 
+																					 --ANTES DEL PRIMER VIERNES DEL SIGUIENTE MES
 	AS BEGIN
 
 		SET NOCOUNT ON
@@ -196,6 +196,10 @@ CREATE PROCEDURE [dbo].[RetornarJueves] @inFecha DATE, @outFecha DATE OUTPUT
 		SET NOCOUNT OFF
 	END
 GO
+
+DECLARE @F DATE
+EXECUTE RetornarFinPlanillaMes @inFecha = '2022-04-03', @outFecha = @F OUTPUT
+SELECT @F
 
 -------------------------------------------------------------------------------------------------------------------------------
 
@@ -323,8 +327,8 @@ CREATE TYPE [dbo].[Deduccion] AS TABLE(
 )
 GO
 
-CREATE PROCEDURE [dbo].[Transaccion] @inValorDocIdentidad INT, @inEntradaF SMALLDATETIME, @inSalidaF SMALLDATETIME, @inMontoGanadoHo MONEY, @inMontoGanadoHD MONEY, @inMontoGanadoHE MONEY,
-									@inFechaItera DATE, @inHorasOrdinarias INT, @inHorasDobles INT, @inEsFinMes BIT, @inEsJueves BIT, @inFinNextMes DATE, @inIdEmpleado INT,
+CREATE PROCEDURE [dbo].[Transaccion] @inValorDocIdentidad INT, @inEntradaF SMALLDATETIME, @inSalidaF SMALLDATETIME, @inMontoGanadoHo MONEY, @inMontoGanadoHED MONEY, @inMontoGanadoHE MONEY,
+									@inFechaItera DATE, @inHorasOrdinarias INT, @inHorasExtras INT, @inEsFinMes BIT, @inEsJueves BIT, @inFinNextMes DATE, @inIdEmpleado INT,
 									@inSalarioNeto MONEY, @inDeduccionesObrero Deduccion READONLY, @inFechaIniMes DATE, @inFechaFinMes DATE
 
 	AS BEGIN
@@ -352,17 +356,17 @@ CREATE PROCEDURE [dbo].[Transaccion] @inValorDocIdentidad INT, @inEntradaF SMALL
 				WHERE @inMontoGanadoHo>0
 			END
 			
-			IF @inMontoGanadoHD>0
+			IF @inMontoGanadoHED>0
 			BEGIN
 				INSERT dbo.MovimientoCredito (Fecha,Monto,IdAsistencia,IdTipoMov,Horas)
-				SELECT @inFechaItera, @inMontoGanadoHD, MAX(A.ID),3,@inHorasDobles
+				SELECT @inFechaItera, @inMontoGanadoHED, MAX(A.ID),3,@inHorasExtras
 				FROM dbo.MarcasDeAsistencia A
 			END
 				
 			IF @inMontoGanadoHE>0
 			BEGIN
 				INSERT dbo.MovimientoCredito (Fecha,Monto,IdAsistencia,IdTipoMov,Horas)
-				SELECT @inFechaItera, @inMontoGanadoHE, MAX(A.ID),2,@inHorasDobles
+				SELECT @inFechaItera, @inMontoGanadoHE, MAX(A.ID),2,@inHorasExtras
 				FROM dbo.MarcasDeAsistencia A
 			END
 					
@@ -371,7 +375,7 @@ CREATE PROCEDURE [dbo].[Transaccion] @inValorDocIdentidad INT, @inEntradaF SMALL
 					
 				SET @NextDay = DATEADD(DAY, 1, @inFechaItera)
 
-				EXECUTE RetornarJueves @inFecha = @NextDay, @outFecha = @inFinNextMes OUTPUT
+				EXECUTE RetornarFinPlanillaMes @inFecha = @NextDay, @outFecha = @inFinNextMes OUTPUT
 						
 				INSERT dbo.PlanillaMesXEmpleado (FechaInicio,FechaFinal,SalarioNeto,SalarioTotal,TotalDeducciones,IdObrero)
 				SELECT
@@ -393,7 +397,7 @@ CREATE PROCEDURE [dbo].[Transaccion] @inValorDocIdentidad INT, @inEntradaF SMALL
 			WHERE IdObrero = @inIdempleado AND @inFechaItera BETWEEN FechaInicio AND FechaFinal
 				
 			UPDATE dbo.PlanillaSemanaXEmpleado
-			SET SalarioTotal=SalarioTotal + @inMontoGanadoHO+@inMontoGanadoHE+@inMontoGanadoHD
+			SET SalarioTotal=SalarioTotal + @inMontoGanadoHO+@inMontoGanadoHE+@inMontoGanadoHED
 			WHERE IdObrero=@inIdEmpleado and @inFechaItera BETWEEN FechaInicio and FechaFinal
 
 			IF @inEsJueves = 1
@@ -440,20 +444,8 @@ CREATE PROCEDURE [dbo].[Transaccion] @inValorDocIdentidad INT, @inEntradaF SMALL
 							
 			END
 
-			SELECT @TD = SUM(S.TotalDeducciones)
-			FROM dbo.PlanillaSemanaXEmpleado S
-			WHERE IdObrero = @inIdempleado AND S.FechaInicio BETWEEN @inFechaIniMes AND @inFechaFinMes
-
-			SELECT @SN = SUM(S.SalarioNeto)
-			FROM dbo.PlanillaSemanaXEmpleado S
-			WHERE IdObrero = @inIdempleado AND S.FechaInicio BETWEEN @inFechaIniMes AND @inFechaFinMes
-
-			SELECT @SB = SUM(S.SalarioTotal)
-			FROM dbo.PlanillaSemanaXEmpleado S
-			WHERE IdObrero = @inIdempleado AND S.FechaInicio BETWEEN @inFechaIniMes AND @inFechaFinMes
-
 			UPDATE dbo.PlanillaMesXEmpleado
-			SET  SalarioTotal = SalarioTotal + (@inMontoGanadoHD+@inMontoGanadoHE+@inMontoGanadoHO)				
+			SET  SalarioTotal = SalarioTotal + (@inMontoGanadoHED+@inMontoGanadoHE+@inMontoGanadoHO)				
 			WHERE IdObrero = @inIdempleado AND @inFechaItera BETWEEN FechaInicio AND FechaFinal
 			
 		COMMIT TRANSACTION
