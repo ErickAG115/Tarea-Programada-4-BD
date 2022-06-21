@@ -62,7 +62,7 @@ EXEC [dbo].[insertarEmpleado] @inNombre = 'Ken', @inIdTipoDocIdentidad = 1, @inV
 
 ---------------------------------------------------------------------------------------
 DROP PROCEDURE IF EXISTS  [dbo].[listarEmpleadosFiltro];
-
+-- hace update para borrar el puesto del id ingresado
 CREATE PROCEDURE  [dbo].[listarEmpleadosFiltro] @inNombre NVARCHAR(128)
 	AS BEGIN
 
@@ -82,7 +82,7 @@ GO
 
 ------------------------------------------------------
 DROP PROCEDURE IF EXISTS [dbo].[editarEmpleado];
-
+	-- Edita los rows del empleado
 CREATE PROCEDURE [dbo].[editarEmpleado] @inId INT, @inNombre NVARCHAR(128), @inTipoDocIdentidad INT, @inValorDocIdentidad INT, @inFechaNacimiento NVARCHAR(128), @inIdDepartamento INT, @inPuesto NVARCHAR(128)
 	AS BEGIN
 		UPDATE [dbo].[Obrero] SET [Obrero].[Nombre] = @inNombre, [Obrero].[IdTipoDocIdentidad] = @inTipoDocIdentidad, [Obrero].[ValorDocIdentidad] = @inValorDocIdentidad, 
@@ -97,6 +97,7 @@ GO
 DROP PROCEDURE IF EXISTS [dbo].[borrarEmpleado];
 
 CREATE PROCEDURE [dbo].[borrarEmpleado] @inId INT
+	-- hace update para borrar el empleado del id ingresado
 	AS BEGIN
 		UPDATE [dbo].[Obrero] SET [Obrero].[Borrado] = 0 WHERE [Obrero].[ID] = @inId;
 	END
@@ -105,6 +106,7 @@ GO
 DROP PROCEDURE IF EXISTS [dbo].[borrarPuesto]
 
 CREATE PROCEDURE [dbo].[borrarPuesto] @inId INT
+	-- hace update para borrar el puesto del id ingresado
 	AS BEGIN
 		UPDATE [dbo].[Puesto] SET [Puesto].[Borrado] = 0 WHERE [Puesto].[ID] = @inId;
 	END
@@ -113,12 +115,14 @@ GO
 DROP PROCEDURE IF EXISTS [dbo].[retornarUsers];
 
 CREATE PROCEDURE [dbo].[retornarUsers]
+	-- Retorna los users
 	AS BEGIN
 		SELECT [Usuarios].[UserName],[Usuarios].[Password] FROM [dbo].[Usuarios];
 	END
 GO
 
 CREATE PROCEDURE [dbo].[retornarPuestos]
+	-- retorna los puestos
 	AS BEGIN
 		SELECT [Puesto].[NombreP] FROM [dbo].[Puesto];
 	END
@@ -133,6 +137,7 @@ CREATE PROCEDURE [dbo].[HorasMontos] @inIdUsuario INT, @inFechaInicio date, @inF
 
 	AS BEGIN
 		SET NOCOUNT ON;
+			-- Revisa entre 2 fechas para sacar el nombre del tipo movimiento y el monto
 			SELECT [TipoMovimiento].[Nombre],
 			[MovimientoCredito].[Monto]
 			FROM [dbo].[Usuarios]
@@ -160,6 +165,7 @@ CREATE PROCEDURE [dbo].[SalariosAnuales] @inUsername VARCHAR(128)
 
 	AS BEGIN
 		SET NOCOUNT ON
+			-- Saca el Id del obrero
 			DECLARE @EMP INT
 			SELECT @EMP = U.IdObrero FROM dbo.Usuarios U WHERE U.UserName = @inUsername
 			SELECT PM.FechaInicio AS FechaInicio, PM.FechaFinal AS FechaFinal, PM.TotalDeducciones AS Deducciones, PM.SalarioTotal AS SalarioBruto, PM.SalarioNeto AS SalarioNeto
