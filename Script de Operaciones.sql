@@ -14,7 +14,7 @@ DECLARE @xmlData XML
 
 SET @xmlData = (
 		SELECT *
-		FROM OPENROWSET(BULK 'C:\Users\eastorga\Documents\GitHub\-Tarea-Programada-BD-2-3\Datos_Tarea3.xml', SINGLE_BLOB) 
+		FROM OPENROWSET(BULK 'C:\Users\eastorga\Documents\GitHub\Tarea-Programada-4-BD\Datos_Tarea3.xml', SINGLE_BLOB) 
 		AS xmlData
 		);
 
@@ -33,7 +33,7 @@ DECLARE @EliminarDeducciones TABLE (ID INT IDENTITY(1,1),IdTipoDec INT, valorDoc
 
 DECLARE @asistencias TABLE (ID INT IDENTITY(1,1), ValorDocIdentidad VARCHAR(64), Entrada DATETIME, Salida DATETIME)
 
-DECLARE @NuevosHorarios TABLE (ID INT IDENTITY(1,1), IdJornada INT, ValorDocIdenT INT)
+DECLARE @NuevosHorarios JornadasSigSemana
 
 DECLARE @DeduccionesObrero Deduccion
 
@@ -103,11 +103,29 @@ SELECT @inicioSigMes, @FinMes
 
 WHILE (@FechaItera<=@FechaFin)
 BEGIN
-	
+
+	-- Si es el fin de semana, habra un nodo de "TipoDeJornadaProximaSemana", para eso se insertan las siguientes jornadas que se
+	-- utilizaran como las nuevas de la siguiente semana
+	IF @xmlData.exist('Datos/Operacion[@Fecha = sql:variable("@FechaItera")]/TipoDeJornadaProximaSemana') = 1
+	BEGIN
+		INSERT dbo.Jornada (IdTipoJornada)
+		SELECT 1
+		INSERT dbo.Jornada (IdTipoJornada)
+		SELECT 2
+		INSERT dbo.Jornada (IdTipoJornada)
+		SELECT 3
+	END
+
 	-- Se obtiene el fin del mes para validaciones dentro de la transaccion
 	SELECT @FinMes = MAX(M.fechaFin) FROM @Meses M
 
-	
+	IF @FechaItera = @FinMes
+	BEGIN
+		SET @inicioSigMes = DATEADD(day, 1, @FechaItera)
+		EXECUTE RetornarFinPlanillaMes @inFecha = @inicioSigMes, @outFecha = @FinNextMes OUTPUT
+		INSERT @Meses (fechaInicio, fechaFin)
+		SELECT @inicioSigMes, @FinNextMes
+	END
 
 	-- Insercion de valores de los nodos dentro de la fecha de operacion
 	INSERT @EmpleadosInsertar (FechaNacimiento, Nombre, Passwrd, UserName, valorDocuIdent, IdDepartamento, IdPuesto, IdTipoDocu)
@@ -428,7 +446,7 @@ BEGIN
 			-- Ejecucion de la transaccion
 			EXEC dbo.Transaccion @inValorDocIdentidad = @valorDocIdentidad, @inEntradaF = @EntradaF, @inSalidaF = @SalidaF, @inMontoGanadoHo = @montoGanadoHo, @inMontoGanadoHED = @montoGanadoHED, @inMontoGanadoHE = @montoGanadoHE,
 					@inFechaItera = @FechaItera, @inHorasOrdinarias = @HorasOrdinarias, @inHorasExtras = @horasExtras, @inEsFinMes = @EsFinMes, @inEsJueves = @EsJueves, @inFinNextMes = @FinNextMes, @inIdEmpleado = @idempleado,
-					@inSalarioNeto = @SalarioNeto, @inDeduccionesObrero = @DeduccionesObrero, @inFechaIniMes = @FechaIniMes, @inFechaFinMes = @FechaFinMes, @outResultCode = @errorTransaccion OUTPUT
+					@inSalarioNeto = @SalarioNeto, @inDeduccionesObrero = @DeduccionesObrero, @inFechaIniMes = @FechaIniMes, @inFechaFinMes = @FechaFinMes, @inNuevosHorarios = @NuevosHorarios, @outResultCode = @errorTransaccion OUTPUT
 			
 			-- SET a la siguiente asistencia para continuar el loop
 			SET @lo = @lo +1 
@@ -444,12 +462,6 @@ BEGIN
 	-- existentes se les asigna la nueva jornada dentro de la transaccion
 	IF @xmlData.exist('Datos/Operacion[@Fecha = sql:variable("@FechaItera")]/TipoDeJornadaProximaSemana') = 1
 	BEGIN
-		INSERT dbo.Jornada (IdTipoJornada)
-		SELECT 1
-		INSERT dbo.Jornada (IdTipoJornada)
-		SELECT 2
-		INSERT dbo.Jornada (IdTipoJornada)
-		SELECT 3
 
 		SELECT @PrimerJID = MIN(NH.ID) FROM @NuevosHorarios NH
 		SELECT @FinalJID = MAX(NH.ID) FROM @NuevosHorarios NH
@@ -464,25 +476,29 @@ BEGIN
 			FROM @NuevosHorarios NH
 			WHERE  NH.ID = @PrimerJID
 
-			SELECT @ObreroSS = O.ID 
-			FROM dbo.Obrero O
-			WHERE O.ValorDocIdentidad = @ValorDocuSS
+			-- Verifica que sea un empleado nuevo al que se le esta asignando la nueva jornada
+			IF EXISTS(SELECT EI.valorDocuIdent FROM @EmpleadosInsertar EI WHERE EI.valorDocuIdent = @ValorDocuSS)
+			BEGIN
+				SELECT @ObreroSS = O.ID 
+				FROM dbo.Obrero O
+				WHERE O.ValorDocIdentidad = @ValorDocuSS
 
-			SELECT @TJornadaSS = NH.IdJornada 
-			FROM @NuevosHorarios NH
-			WHERE  NH.ID = @PrimerJID
+				SELECT @TJornadaSS = NH.IdJornada 
+				FROM @NuevosHorarios NH
+				WHERE  NH.ID = @PrimerJID
 
-			SELECT @JornadaSS = MAX(J.ID)
-			FROM dbo.Jornada J
-			WHERE J.IdTipoJornada = @TJornadaSS
+				SELECT @JornadaSS = MAX(J.ID)
+				FROM dbo.Jornada J
+				WHERE J.IdTipoJornada = @TJornadaSS
 
-			UPDATE dbo.Obrero
-			SET IdJornada = @JornadaSS
-			WHERE ID = @ObreroSS
+				UPDATE dbo.Obrero
+				SET IdJornada = @JornadaSS
+				WHERE ID = @ObreroSS
 
-			UPDATE dbo.PlanillaSemanaXEmpleado
-			SET IdJornada = @JornadaSS
-			WHERE IdObrero = @ObreroSS AND @FechaItera BETWEEN FechaInicio AND FechaFinal
+				UPDATE dbo.PlanillaSemanaXEmpleado
+				SET IdJornada = @JornadaSS
+				WHERE IdObrero = @ObreroSS AND DATEADD(day, 1, @FechaItera) BETWEEN FechaInicio AND FechaFinal
+			END
 
 			SET @PrimerJID = @PrimerJID+1
 		END
@@ -497,14 +513,6 @@ BEGIN
 		WHERE EB.ValorDocuId = ValorDocIdentidad
 	END
 
-	IF @FechaItera = @FinMes
-	BEGIN
-		SET @inicioSigMes = DATEADD(day, 1, @FechaItera)
-		EXECUTE RetornarFinPlanillaMes @inFecha = @inicioSigMes, @outFecha = @FinNextMes OUTPUT
-		INSERT @Meses (fechaInicio, fechaFin)
-		SELECT @inicioSigMes, @FinNextMes
-	END
-
 	-- Reseteo de tablas variable para empezar la siguiente fecha de operacion
 	DELETE FROM @asistencias
 	DELETE FROM @EmpleadosBorrar
@@ -515,5 +523,4 @@ BEGIN
 	SET @FechaItera = DATEADD(day, 1, @FechaItera)
 	
 END
-
 SET NOCOUNT OFF

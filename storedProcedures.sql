@@ -198,7 +198,7 @@ CREATE PROCEDURE [dbo].[RetornarFinPlanillaMes] @inFecha DATE, @outFecha DATE OU
 GO
 
 DECLARE @F DATE
-EXECUTE RetornarFinPlanillaMes @inFecha = '2022-02-28', @outFecha = @F OUTPUT
+EXECUTE RetornarFinPlanillaMes @inFecha = '2022-03-04', @outFecha = @F OUTPUT
 SELECT @F
 
 -------------------------------------------------------------------------------------------------------------------------------
@@ -326,10 +326,18 @@ CREATE TYPE [dbo].[Deduccion] AS TABLE(
 	Obligatorio INT NOT NULL
 )
 GO
+
+CREATE TYPE [dbo].[JornadasSigSemana] AS TABLE(
+    ID INT IDENTITY(1,1) NOT NULL,
+	IdJornada INT NOT NULL,
+	ValorDocIdenT INT NOT NULL
+)
+GO
+
 -- Transaccion del programa
 CREATE PROCEDURE [dbo].[Transaccion] @inValorDocIdentidad INT, @inEntradaF SMALLDATETIME, @inSalidaF SMALLDATETIME, @inMontoGanadoHo MONEY, @inMontoGanadoHED MONEY, @inMontoGanadoHE MONEY,
 									@inFechaItera DATE, @inHorasOrdinarias INT, @inHorasExtras INT, @inEsFinMes BIT, @inEsJueves BIT, @inFinNextMes DATE, @inIdEmpleado INT,
-									@inSalarioNeto MONEY, @inDeduccionesObrero Deduccion READONLY, @inFechaIniMes DATE, @inFechaFinMes DATE, @OutResultCode INT OUTPUT
+									@inSalarioNeto MONEY, @inDeduccionesObrero Deduccion READONLY, @inFechaIniMes DATE, @inFechaFinMes DATE, @inNuevosHorarios JornadasSigSemana READONLY, @OutResultCode INT OUTPUT
 
 	AS BEGIN
 		
@@ -337,9 +345,8 @@ CREATE PROCEDURE [dbo].[Transaccion] @inValorDocIdentidad INT, @inEntradaF SMALL
 		DECLARE @NextDay DATE
 		DECLARE @Deduccion INT
 		DECLARE @MAXDeduccion INT
-		DECLARE @SB INT
-		DECLARE @SN INT
-		DECLARE @TD INT
+		DECLARE @TipoJornadaSigSemana INT
+		DECLARE @JornadaSigSemana INT
 		BEGIN TRY
 			SET @OutResultCode=0
 			BEGIN TRANSACTION procesarAsistencia
@@ -437,11 +444,24 @@ CREATE PROCEDURE [dbo].[Transaccion] @inValorDocIdentidad INT, @inEntradaF SMALL
 						(@inIdempleado),
 						(SELECT M.ID
 						FROM dbo.PlanillaMesXEmpleado M
-						WHERE (@inFechaItera BETWEEN M.FechaInicio AND M.FechaFinal) AND (IdObrero=@inIdempleado)),
+						WHERE (DATEADD(day, 1, @inFechaItera) BETWEEN M.FechaInicio AND M.FechaFinal) AND (IdObrero=@inIdempleado)),
 						(SELECT O.IdJornada
 						FROM dbo.Obrero O
 						WHERE O.ValorDocIdentidad = @inValorDocIdentidad)
-							
+					
+					IF EXISTS(SELECT NH.ValorDocIdenT FROM @inNuevosHorarios NH WHERE NH.ValorDocIdenT = @inValorDocIdentidad)
+					BEGIN
+						SELECT @TipoJornadaSigSemana = NH.IdJornada FROM @inNuevosHorarios NH WHERE NH.ValorDocIdenT = @inValorDocIdentidad
+						SELECT @JornadaSigSemana = MAX(J.ID) FROM dbo.Jornada J WHERE J.IdTipoJornada = @TipoJornadaSigSemana
+
+						UPDATE dbo.Obrero
+						SET IdJornada = @JornadaSigSemana
+						WHERE ID = @inIdEmpleado
+
+						UPDATE dbo.PlanillaSemanaXEmpleado
+						SET IdJornada = @JornadaSigSemana
+						WHERE ID = @inIdEmpleado AND DATEADD(day, 1, @inFechaItera) BETWEEN FechaInicio AND FechaFinal
+					END
 				END
 
 				UPDATE dbo.PlanillaMesXEmpleado

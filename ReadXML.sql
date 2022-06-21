@@ -13,7 +13,7 @@ DECLARE @xmlData XML
 
 SET @xmlData = (
 		SELECT *
-		FROM OPENROWSET(BULK 'C:\Users\eastorga\Documents\GitHub\-Tarea-Programada-BD-2-3\Datos_Tarea3.xml', SINGLE_BLOB) 
+		FROM OPENROWSET(BULK 'C:\Users\eastorga\Documents\GitHub\Tarea-Programada-4-BD\Datos_Tarea3.xml', SINGLE_BLOB) 
 		AS xmlData
 		);
 

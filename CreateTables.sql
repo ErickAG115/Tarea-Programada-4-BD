@@ -212,7 +212,7 @@ CREATE TABLE [dbo].[TipoMovimiento](
 GO
 
 CREATE TABLE [dbo].[Error](
-	[Id] [int] NOT NULL,
+	[Id] [int] IDENTITY(1,1) NOT NULL,
 	[Username] [varchar](128) NULL,
 	[ErrorNumber] [int] NULL,
 	[ErrorState] [int] NULL,
