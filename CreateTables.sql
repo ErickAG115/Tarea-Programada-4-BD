@@ -211,6 +211,20 @@ CREATE TABLE [dbo].[TipoMovimiento](
 ) ON [PRIMARY]
 GO
 
+CREATE TABLE [dbo].[Error](
+	[Id] [int] NOT NULL,
+	[Username] [varchar](128) NULL,
+	[ErrorNumber] [int] NULL,
+	[ErrorState] [int] NULL,
+	[ErrorSeverity] [int] NULL,
+	[ErrorLine] [int] NULL,
+	[ErrorProcedure] [varchar](max) NULL,
+	[ErrorMessage] [varchar](max) NULL,
+	[ErrorDateTime] [datetime] NULL
+) ON [PRIMARY] TEXTIMAGE_ON [PRIMARY]
+GO
+
+
 ALTER TABLE [dbo].[Deducciones]  WITH CHECK ADD  CONSTRAINT [FK_Deducciones_Obrero] FOREIGN KEY([IdObrero])
 REFERENCES [dbo].[Obrero] ([ID])
 GO

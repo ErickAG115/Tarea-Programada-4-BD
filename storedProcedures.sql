@@ -198,7 +198,7 @@ CREATE PROCEDURE [dbo].[RetornarFinPlanillaMes] @inFecha DATE, @outFecha DATE OU
 GO
 
 DECLARE @F DATE
-EXECUTE RetornarFinPlanillaMes @inFecha = '2022-04-03', @outFecha = @F OUTPUT
+EXECUTE RetornarFinPlanillaMes @inFecha = '2022-02-28', @outFecha = @F OUTPUT
 SELECT @F
 
 -------------------------------------------------------------------------------------------------------------------------------
@@ -329,12 +329,11 @@ GO
 -- Transaccion del programa
 CREATE PROCEDURE [dbo].[Transaccion] @inValorDocIdentidad INT, @inEntradaF SMALLDATETIME, @inSalidaF SMALLDATETIME, @inMontoGanadoHo MONEY, @inMontoGanadoHED MONEY, @inMontoGanadoHE MONEY,
 									@inFechaItera DATE, @inHorasOrdinarias INT, @inHorasExtras INT, @inEsFinMes BIT, @inEsJueves BIT, @inFinNextMes DATE, @inIdEmpleado INT,
-									@inSalarioNeto MONEY, @inDeduccionesObrero Deduccion READONLY, @inFechaIniMes DATE, @inFechaFinMes DATE
+									@inSalarioNeto MONEY, @inDeduccionesObrero Deduccion READONLY, @inFechaIniMes DATE, @inFechaFinMes DATE, @OutResultCode INT OUTPUT
 
 	AS BEGIN
 		
 		SET NOCOUNT ON
-
 		DECLARE @NextDay DATE
 		DECLARE @Deduccion INT
 		DECLARE @MAXDeduccion INT
@@ -343,7 +342,7 @@ CREATE PROCEDURE [dbo].[Transaccion] @inValorDocIdentidad INT, @inEntradaF SMALL
 		DECLARE @TD INT
 		BEGIN TRY
 			SET @OutResultCode=0
-			BEGIN TRANSACTION
+			BEGIN TRANSACTION procesarAsistencia
 				INSERT dbo.MarcasDeAsistencia(ValorTipoDocu,FechaEntrada,FechaSalida,IdJornada)
 				SELECT @inValorDocIdentidad,@inEntradaF,@inSalidaF,O.IdJornada
 				FROM dbo.Obrero O
@@ -449,13 +448,15 @@ CREATE PROCEDURE [dbo].[Transaccion] @inValorDocIdentidad INT, @inEntradaF SMALL
 				SET  SalarioTotal = SalarioTotal + (@inMontoGanadoHED+@inMontoGanadoHE+@inMontoGanadoHO)				
 				WHERE IdObrero = @inIdempleado AND @inFechaItera BETWEEN FechaInicio AND FechaFinal
 			
-			COMMIT TRANSACTION
-		END TRY;
+			COMMIT TRANSACTION procesarAsistencia
+		END TRY
 		BEGIN CATCH
 			IF @@TRANCOUNT>0
-				ROLLBACK MarcasDeAsistencia;
+			BEGIN
+				ROLLBACK TRAN procesarAsistencia;
+			END
 			SET @OutResultCode=50005; -- Error de BD
-				INSERT INTO dbo.DBErrors
+				INSERT INTO dbo.Error
 				(UserName
 				, ErrorNumber
 				, ErrorState
@@ -463,16 +464,16 @@ CREATE PROCEDURE [dbo].[Transaccion] @inValorDocIdentidad INT, @inEntradaF SMALL
 				, ErrorLine
 				, ErrorProcedure
 				, ErrorMessage
-				,ErrorDateTime)
+				, ErrorDateTime)
 			VALUES (
-				SUSER_SNAME()
-				, ERROR_NUMBER()
-				,ERROR_STATE()
-				, ERROR_SEVERITY()
-				,ERROR_LINE
-				, ERROR_PROCEDURE()
-				, ERROR_MESSAGE
-				, GETDATE()
+				SUSER_SNAME(),
+				ERROR_NUMBER(),
+				ERROR_STATE(),
+				ERROR_SEVERITY(),
+				ERROR_LINE(),
+				ERROR_PROCEDURE(),
+				ERROR_MESSAGE(),
+				GETDATE()
 			);
 			END CATCH;
 		SET NOCOUNT OFF

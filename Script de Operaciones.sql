@@ -20,6 +20,8 @@ SET @xmlData = (
 
 DECLARE @Fechas TABLE (ID INT IDENTITY (1, 1), fechaOperacion DATE)
 
+DECLARE @Meses TABLE (ID INT IDENTITY (1, 1), fechaInicio DATE, fechaFin DATE)
+
 DECLARE @EmpleadosInsertar TABLE (ID INT IDENTITY(1,1),FechaNacimiento DATE, Nombre VARCHAR(128), Passwrd VARCHAR(128),
 		UserName VARCHAR(128),valorDocuIdent INT, IdDepartamento INT, IdPuesto INT, IdTipoDocu INT)
 
@@ -76,6 +78,8 @@ DECLARE @FinMes DATE
 DECLARE @FinNextMes DATE
 DECLARE @FechaIniMes DATE
 DECLARE @FechaFinMes DATE
+DECLARE @errorTransaccion INT
+DECLARE @inicioSigMes DATE
 
 
 INSERT @Fechas (FechaOperacion)
@@ -89,13 +93,21 @@ FROM @Fechas
 INSERT dbo.Jornada (IdTipoJornada)
 SELECT 1
 
+SET @inicioSigMes = DATEADD(day, 1, @FechaItera)
+
+EXECUTE RetornarFinPlanillaMeS @inFecha = @inicioSigMes, @outFecha = @FinMes OUTPUT
+
+INSERT @Meses (fechaInicio, fechaFin)
+SELECT @inicioSigMes, @FinMes
 --
 
 WHILE (@FechaItera<=@FechaFin)
 BEGIN
 	
 	-- Se obtiene el fin del mes para validaciones dentro de la transaccion
-	EXECUTE RetornarFinPlanillaMeS @inFecha = @FechaItera, @outFecha = @FinMes OUTPUT
+	SELECT @FinMes = MAX(M.fechaFin) FROM @Meses M
+
+	
 
 	-- Insercion de valores de los nodos dentro de la fecha de operacion
 	INSERT @EmpleadosInsertar (FechaNacimiento, Nombre, Passwrd, UserName, valorDocuIdent, IdDepartamento, IdPuesto, IdTipoDocu)
@@ -153,8 +165,8 @@ BEGIN
 		-- Se crea un planilla default para su primer mes
 		INSERT dbo.PlanillaMesXEmpleado (FechaInicio,FechaFinal,SalarioNeto,SalarioTotal,TotalDeducciones,IdObrero)
 		SELECT
-			@FechaItera,
-			@FinMes,
+			(SELECT MAX(M.fechaInicio) FROM @Meses M),
+			(SELECT MAX(M.fechaFin) FROM @Meses M),
 			0,
 			0,
 			0,
@@ -186,12 +198,12 @@ BEGIN
 
 			SELECT @MesSemana = M.ID
 			FROM dbo.PlanillaMesXEmpleado M
-			WHERE M.IdObrero = @EmpleadoSemana AND @FechaItera BETWEEN M.FechaInicio AND M.FechaFinal
+			WHERE M.IdObrero = @EmpleadoSemana AND DATEADD(day, 1, @FechaItera) BETWEEN M.FechaInicio AND M.FechaFinal
 
 			INSERT dbo.PlanillaSemanaXEmpleado (FechaInicio,FechaFinal,SalarioNeto,SalarioTotal,TotalDeducciones,IdObrero,IdMes,IdJornada)
 			SELECT
-				(@FechaItera),
-				(DATEADD(day, 6, @FechaItera)),
+				(DATEADD(day, 1, @FechaItera)),
+				(DATEADD(day, 7, @FechaItera)),
 				(0),
 				(0),
 				(0),
@@ -416,12 +428,12 @@ BEGIN
 			-- Ejecucion de la transaccion
 			EXEC dbo.Transaccion @inValorDocIdentidad = @valorDocIdentidad, @inEntradaF = @EntradaF, @inSalidaF = @SalidaF, @inMontoGanadoHo = @montoGanadoHo, @inMontoGanadoHED = @montoGanadoHED, @inMontoGanadoHE = @montoGanadoHE,
 					@inFechaItera = @FechaItera, @inHorasOrdinarias = @HorasOrdinarias, @inHorasExtras = @horasExtras, @inEsFinMes = @EsFinMes, @inEsJueves = @EsJueves, @inFinNextMes = @FinNextMes, @inIdEmpleado = @idempleado,
-					@inSalarioNeto = @SalarioNeto, @inDeduccionesObrero = @DeduccionesObrero, @inFechaIniMes = @FechaIniMes, @inFechaFinMes = @FechaFinMes
+					@inSalarioNeto = @SalarioNeto, @inDeduccionesObrero = @DeduccionesObrero, @inFechaIniMes = @FechaIniMes, @inFechaFinMes = @FechaFinMes, @outResultCode = @errorTransaccion OUTPUT
 			
 			-- SET a la siguiente asistencia para continuar el loop
 			SET @lo = @lo +1 
 			DELETE FROM @DeduccionesObrero
-			SET @Dobles = 0
+			SET @Extras = 0
 			SET @montoGanadoHO = 0
 			SET @montoGanadoHED = 0
 			SET @montoGanadoHE = 0
@@ -483,6 +495,14 @@ BEGIN
 		SET Borrado = 1
 		FROM @EmpleadosBorrar EB
 		WHERE EB.ValorDocuId = ValorDocIdentidad
+	END
+
+	IF @FechaItera = @FinMes
+	BEGIN
+		SET @inicioSigMes = DATEADD(day, 1, @FechaItera)
+		EXECUTE RetornarFinPlanillaMes @inFecha = @inicioSigMes, @outFecha = @FinNextMes OUTPUT
+		INSERT @Meses (fechaInicio, fechaFin)
+		SELECT @inicioSigMes, @FinNextMes
 	END
 
 	-- Reseteo de tablas variable para empezar la siguiente fecha de operacion
