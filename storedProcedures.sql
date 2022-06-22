@@ -226,6 +226,8 @@ CREATE PROCEDURE [dbo].[ConsultaSemanas] @inUsername VARCHAR(128)
 		DECLARE @HE INT = 0
 		DECLARE @HD INT = 0
 
+		-- Se crea una tabla variable para primero recolectar todos los datos de las horas y tener todo junto en una tabla para mostrarla con mayor facilidad
+
 		INSERT @Planillas (FechaInicio,FechaFin,SalarioBruto,SalarioNeto,Deducciones,HorasO,HorasE,HorasD)
 		SELECT PSE.FechaInicio, PSE.FechaFinal,PSE.SalarioTotal,PSE.SalarioNeto,PSE.TotalDeducciones,0,0,0
 		FROM dbo.PlanillaSemanaXEmpleado PSE
@@ -239,6 +241,8 @@ CREATE PROCEDURE [dbo].[ConsultaSemanas] @inUsername VARCHAR(128)
 
 		WHILE (@FirstID<=@LastID)
 		BEGIN
+
+			-- Se obtienen las horas y con cada recorrido se le hace un update a la semana respectiva
 			SELECT @FechaINI = P.FechaInicio, @FechaFIN = p.FechaFin
 			FROM @Planillas P
 			WHERE P.ID = @FirstID
@@ -347,6 +351,7 @@ CREATE PROCEDURE [dbo].[Transaccion] @inValorDocIdentidad INT, @inEntradaF SMALL
 
 	AS BEGIN
 		
+		-- Declaracion de variables necesarias para el proceso
 		SET NOCOUNT ON
 		DECLARE @NextDay DATE
 		DECLARE @Deduccion INT
@@ -354,13 +359,17 @@ CREATE PROCEDURE [dbo].[Transaccion] @inValorDocIdentidad INT, @inEntradaF SMALL
 		DECLARE @TipoJornadaSigSemana INT
 		DECLARE @JornadaSigSemana INT
 		BEGIN TRY
+			-- Se hace set de resultado a 0 (no hay error)
 			SET @OutResultCode=0
 			BEGIN TRANSACTION procesarAsistencia
+				--Se inserta la asistencia en la tabla de marcas
 				INSERT dbo.MarcasDeAsistencia(ValorTipoDocu,FechaEntrada,FechaSalida,IdJornada)
 				SELECT @inValorDocIdentidad,@inEntradaF,@inSalidaF,O.IdJornada
 				FROM dbo.Obrero O
 				WHERE @inValorDocIdentidad = O.ValorDocIdentidad
 				
+				-- Se validan que los montos ganados no sean 0 (para evitar errores) y para ver si se deben registrar
+				-- De no ser 0 se crea el movimiento generado por la cantidad de horas
 				IF @inMontoGanadoHo>0
 				BEGIN
 					INSERT dbo.MovimientoCredito (Fecha,Monto,IdAsistencia,IdTipoMov,Horas)
@@ -369,6 +378,7 @@ CREATE PROCEDURE [dbo].[Transaccion] @inValorDocIdentidad INT, @inEntradaF SMALL
 					WHERE @inMontoGanadoHo>0
 				END
 			
+				-- Horas extras dobles
 				IF @inMontoGanadoHED>0
 				BEGIN
 					INSERT dbo.MovimientoCredito (Fecha,Monto,IdAsistencia,IdTipoMov,Horas)
@@ -376,18 +386,21 @@ CREATE PROCEDURE [dbo].[Transaccion] @inValorDocIdentidad INT, @inEntradaF SMALL
 					FROM dbo.MarcasDeAsistencia A
 				END
 				
+				-- Horas extras ordinarias
 				IF @inMontoGanadoHE>0
 				BEGIN
 					INSERT dbo.MovimientoCredito (Fecha,Monto,IdAsistencia,IdTipoMov,Horas)
 					SELECT @inFechaItera, @inMontoGanadoHE, MAX(A.ID),2,@inHorasExtras
 					FROM dbo.MarcasDeAsistencia A
 				END
-					
+				
+				-- Si es fin de mes se crea una nueva planilla mensual para el empleado
 				IF @inEsFinMes = 1
 				BEGIN
 					
 					SET @NextDay = DATEADD(DAY, 1, @inFechaItera)
 
+					-- Return de el fin del mes para ingresar el valor de la tabla
 					EXECUTE RetornarFinPlanillaMes @inFecha = @NextDay, @outFecha = @inFinNextMes OUTPUT
 						
 					INSERT dbo.PlanillaMesXEmpleado (FechaInicio,FechaFinal,SalarioNeto,SalarioTotal,TotalDeducciones,IdObrero)
@@ -401,6 +414,7 @@ CREATE PROCEDURE [dbo].[Transaccion] @inValorDocIdentidad INT, @inEntradaF SMALL
 
 				END
 
+				-- Update diario a semana y mes con respecto a sus salarios netos y brutos
 				UPDATE dbo.PlanillaSemanaXEmpleado
 				SET SalarioNeto = SalarioNeto + @inSalarioNeto
 				WHERE IdObrero = @inIdempleado and @inFechaItera BETWEEN FechaInicio and FechaFinal
@@ -413,13 +427,16 @@ CREATE PROCEDURE [dbo].[Transaccion] @inValorDocIdentidad INT, @inEntradaF SMALL
 				SET SalarioTotal=SalarioTotal + @inMontoGanadoHO+@inMontoGanadoHE+@inMontoGanadoHED
 				WHERE IdObrero=@inIdEmpleado and @inFechaItera BETWEEN FechaInicio and FechaFinal
 
+				-- Si es jueves se hacen las siguientes inserciones/updates
 				IF @inEsJueves = 1
 				BEGIN
 					SELECT @Deduccion = MIN(DO.ID) FROM @inDeduccionesObrero DO
 					SELECT @MAXDeduccion = MAX(DO.ID) FROM @inDeduccionesObrero DO
 
+					-- Se recorre la tabla de deducciones del obrero
 					WHILE (@Deduccion<=@MAXDeduccion)
 					BEGIN
+						-- Por cada deduccion se crea su movimiento de debito respectivo
 						INSERT dbo.MovimientoDebito (Fecha, Monto, IdDeduccion, IdTipoMov)
 						SELECT
 							@inFechaItera,
@@ -430,6 +447,7 @@ CREATE PROCEDURE [dbo].[Transaccion] @inValorDocIdentidad INT, @inEntradaF SMALL
 							WHERE DO.ID = @Deduccion
 						SET @Deduccion = @Deduccion+1
 
+						-- Update al total de deducciones de semana y mes
 						UPDATE PlanillaSemanaXEmpleado
 						SET TotalDeducciones=TotalDeducciones+1
 						WHERE IdObrero = @inIdempleado AND @inFechaItera BETWEEN FechaInicio AND FechaFinal
@@ -440,6 +458,7 @@ CREATE PROCEDURE [dbo].[Transaccion] @inValorDocIdentidad INT, @inEntradaF SMALL
 						
 					END
 
+					-- Se inserta la planilla de la siguiente semana para el obrero
 					INSERT dbo.PlanillaSemanaXEmpleado (FechaInicio,FechaFinal,SalarioNeto,SalarioTotal,TotalDeducciones,IdObrero,IdMes,IdJornada)
 					SELECT
 						(DATEADD(day, 1, @inFechaItera)),
@@ -455,6 +474,8 @@ CREATE PROCEDURE [dbo].[Transaccion] @inValorDocIdentidad INT, @inEntradaF SMALL
 						FROM dbo.Obrero O
 						WHERE O.ValorDocIdentidad = @inValorDocIdentidad)
 					
+					-- Se verifique que este tenga nuevo horario la semana que viene
+					-- De tenerlo, se le asigna su nueva jornada
 					IF EXISTS(SELECT NH.ValorDocIdenT FROM @inNuevosHorarios NH WHERE NH.ValorDocIdenT = @inValorDocIdentidad)
 					BEGIN
 						SELECT @TipoJornadaSigSemana = NH.IdJornada FROM @inNuevosHorarios NH WHERE NH.ValorDocIdenT = @inValorDocIdentidad
@@ -470,6 +491,7 @@ CREATE PROCEDURE [dbo].[Transaccion] @inValorDocIdentidad INT, @inEntradaF SMALL
 					END
 				END
 
+				-- Update de salario total al mes
 				UPDATE dbo.PlanillaMesXEmpleado
 				SET  SalarioTotal = SalarioTotal + (@inMontoGanadoHED+@inMontoGanadoHE+@inMontoGanadoHO)				
 				WHERE IdObrero = @inIdempleado AND @inFechaItera BETWEEN FechaInicio AND FechaFinal
@@ -477,6 +499,7 @@ CREATE PROCEDURE [dbo].[Transaccion] @inValorDocIdentidad INT, @inEntradaF SMALL
 			COMMIT TRANSACTION procesarAsistencia
 		END TRY
 		BEGIN CATCH
+			-- Control de errores
 			IF @@TRANCOUNT>0
 			BEGIN
 				ROLLBACK TRAN procesarAsistencia;
